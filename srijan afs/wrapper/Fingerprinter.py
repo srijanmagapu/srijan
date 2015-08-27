@@ -5,11 +5,6 @@ import wave
 import numpy
 from warnings import warn
 
-# Based on Kalker, Haitsma - "A Highly Robust Audio Fingerprinting System"
-# Journal of New Music Research, Volume 32, Issue 2, 2003
-# We assume that the amplitudes in wave files are linearly encoded
-
-
 #Author - Srijan Magapu - Symphonium Project
 
 class Fingerprinter(object):
