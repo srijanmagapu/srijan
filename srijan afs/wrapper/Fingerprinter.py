@@ -13,7 +13,88 @@ from warnings import warn
 #Author - Srijan Magapu - Symphonium Project
 
 class Fingerprinter(object):
+    """
+
+    """
     
+    # constants
+    FREQUENCY_BAND_LOWER_LIMIT = 300.0  # only frequencies (in Hz) in this band are analysed
+    FREQUENCY_BAND_UPPER_LIMIT = 2000.0 #
+    FINGERPRINT_NBITS = 32              # number of bits for the fingerprint of a frame
+    
+    # raw properties (given by the user)
+    wavefile = None                # the wave file to analyse
+    framewidth = None              # width of the frames in seconds
+    overlap = None                 # how much do the frames overlap? < 1.0
+    
+    # derived properties
+    nsamples = None                # number of samples in file
+    nsamples_per_frame = None      # Number of samples per frame
+    nframes = None                 # number of frames in the whole file
+    samples_rate = None            # number of samples per second
+    sample_width = None            # bytes per sample
+    resolution = None              # resolution of the frames in seconds, i.e. for every <resolution> seconds there is one sub-fingerprint
+    nsamples_between_frames = None # How many samples are there between the first sample two neighboring frames
+    frequency_band_boundary_indices = numpy.zeros(FINGERPRINT_NBITS) # Boundaries of the frequency bands used for fingerprint generation
+
+    # properties that are not relevant for calculating anything but might be interesting
+    index_width_lower_to_upper = None # how many fourier components lie within 300Hz..2000Hz
+    
+    # arrays that contain all the sub-fingerprints of the wave file
+    fingerprints = None
+    fingerprints_binary = None
+    
+    # Initialize the wrapper with a wave file and appropriate settings.
+    # The framewidth can be given in seconds instead of samples (easier for humans to calculate)
+    # The overlap is element [0,1) and describes how much two frames overlap
+    # lower overlap gives better resolution but more redundancy in the fingerprints
+    def __init__(self, filepath=None, framewidth=0.37, overlap=31.0/32.0):
+        self.wavefile = wave.open(filepath, 'rb')
+        self.framewidth = framewidth
+        self.overlap = overlap
+        
+        # extract info from wave file. note that the terminology of this code
+        # and that of the python standard lib are not the same!
+        n_channels = self.wavefile.getnchannels()        # how many channels?
+        self.sample_width = self.wavefile.getsampwidth() # how many bytes per sample?
+        self.nsamples = self.wavefile.getnframes()       # how many samples in total?
+        self.sample_rate = self.wavefile.getframerate()  # how many samples per second?
+
+        length_in_seconds = self.nsamples / self.sample_rate # length of the whole track
+        
+        if (( n_channels > 1 ) or (self.sample_width != 2)):
+            raise Exception("Can only work with 16bit mono wave files currently.")
+        
+        # Input validation
+        # Frames must be smaller than the entire length of the file
+        if ( self.framewidth > length_in_seconds or self.framewidth < 0.0):
+            warn("Framewidth larger than entire audio file! Defaulting to the whole length.")
+            self.framewidth = length_in_seconds
+        # overlap must be between 0 and 1
+        if ( self.overlap >= 1.0 or self.overlap < 0.0 ):
+            warn("Overlap must be within [0, 1). Defaulting to 31/32.") 
+            self.overlap = 31.0/32.0
+            
+        # calculate derived quantities
+        self.nsamples_per_frame = math.floor(self.sample_rate * self.framewidth)
+        self.resolution = (1.0 - self.overlap) * self.framewidth
+        self.nsamples_between_frames = math.floor((1.0 - self.overlap) * self.nsamples_per_frame)
+        if ( self.nsamples_between_frames == 0):
+            self.nsamples_between_frames = 1 # advance at least one sample for each sub-fingerprint!
+        self.nframes = math.floor( self.nsamples / self.nsamples_between_frames )
+            
+        # init array of sub-fingerprints, length is the number of frames
+        self.fingerprints = numpy.zeros(self.nframes)
+        self.fingerprints_binary = numpy.zeros((self.nframes, self.FINGERPRINT_NBITS), dtype=numpy.bool)
+        
+        # given the number of samples in a frame and its length in seconds, we can calculate
+        # the indices that indicate the boundaries between frequency bands
+        # we do this once at initialization
+        self.frequency_band_boundary_indices = self.calculate_frequency_bands(self.nsamples_per_frame, self.framewidth)
+
+
+    def close(self):
+      self.wavefile.close()
 
 
     # actually calculate all sub-fingerprints
